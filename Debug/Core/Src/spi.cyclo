@@ -1,0 +1,5 @@
+../Core/Src/spi.c:32:6:spi_enable	1
+../Core/Src/spi.c:43:6:spi_disable	1
+../Core/Src/spi.c:55:6:spi_transmit	1
+../Core/Src/spi.c:68:6:spi_recieve	2
+../Core/Src/spi.c:95:6:spi	2

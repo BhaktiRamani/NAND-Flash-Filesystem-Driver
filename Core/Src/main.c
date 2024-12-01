@@ -18,6 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "stdio.h"
+#include "m78a_flash.h"
+
+#include  <errno.h>
+#include  <sys/unistd.h> // STDOUT_FILENO, STDERR_FILENO
+
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -37,12 +43,16 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
+SPI_HandleTypeDef hspi4;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 I2S_HandleTypeDef hi2s2;
 
-SPI_HandleTypeDef hspi4;
+//SPI_HandleTypeDef hspi4;
+
+UART_HandleTypeDef huart1;
+UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
@@ -53,6 +63,8 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2S2_Init(void);
 static void MX_SPI4_Init(void);
+static void MX_USART1_UART_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -62,6 +74,21 @@ static void MX_SPI4_Init(void);
 
 /* USER CODE END 0 */
 
+int _write(int file, char *data, int len)
+{
+   if ((file != STDOUT_FILENO) && (file != STDERR_FILENO))
+   {
+      errno = EBADF;
+      return -1;
+   }
+
+   // arbitrary timeout 1000
+   HAL_StatusTypeDef status =
+      HAL_UART_Transmit(&huart2, (uint8_t*)data, len, 1000);
+
+   // return # of bytes written - as best we can tell
+   return (status == HAL_OK ? len : 0);
+}
 /**
   * @brief  The application entry point.
   * @retval int
@@ -93,54 +120,33 @@ int main(void)
   MX_GPIO_Init();
 
   MX_SPI4_Init();
+  MX_USART2_UART_Init();
+
+
+
+
   /* USER CODE BEGIN 2 */
-//  spi_bit_bang(0xFFFF);
-//  while(1)
-//  {
-//	    spi_bit_bang(0x9F00);
-//	    for(int i = 0; i<1000; i++){}
-//  }
+  m78a_init(&hspi4);
 
-//  spi_bit_bang(0x00);
-//  spi_bit_bang(0x00);
-//  spi_bit_bang(0x00);
-//  while(1)
-//  {
-//	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
-//      for(int i = 0; i< 100000; i++);
 //
-//	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
-//	  for(int i = 0; i< 100000; i++);
-//  }
-
-
-
-  uint8_t tx_read_id_command[2] = {0xFF, 0x00};
-  uint8_t rx_device_data[2] = {0};
-  //device id reading
-
+//  uint8_t tx_read_id_command[2] = {0xFF, 0x00};
+//  uint8_t rx_device_data[2] = {0};
+////  //device id reading
+////
+////
+//	 tx_read_id_command[0] = 0x9f;
+//	 tx_read_id_command[1] = 0X00;
+//
+//	   rx_device_data[0] = 0;
+//			   rx_device_data[1] =	   0;
+//
 //  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
 //  for(long i=0; i<100; i++){}
-//  //  HAL_SPI_TransmitReceive(&hspi1, tx_read_id_command, rx_device_data, 2, 100);
-//	HAL_SPI_Transmit(&hspi1, tx_read_id_command, 1, 1000);
-//	HAL_SPI_Receive(&hspi1, rx_device_data , 2, 1000);
-
-//	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
-//	for(long i=0; i<100; i++){}
-
-	 tx_read_id_command[0] = 0x9f;
-	 tx_read_id_command[1] = 0X00;
-
-	   rx_device_data[0] = 0;
-			   rx_device_data[1] =	   0;
-
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
-  for(long i=0; i<100; i++){}
-//  HAL_SPI_TransmitReceive(&hspi1, tx_read_id_command, rx_device_data, 2, 100);
-  HAL_SPI_Transmit(&hspi4, tx_read_id_command, 2, 1000);
-  HAL_SPI_Receive(&hspi4, rx_device_data , 2, 1000);
-  for(long i=0; i<100; i++){}
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
+//  //HAL_SPI_TransmitReceive(&hspi4, tx_read_id_command, rx_device_data, , 100);
+//  HAL_SPI_Transmit(&hspi4, tx_read_id_command, 2, 1000);
+//  HAL_SPI_Receive(&hspi4, rx_device_data , 2, 1000);
+//  for(long i=0; i<100; i++){}
+//  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
 
 
   /* USER CODE END 2 */
@@ -270,6 +276,72 @@ static void MX_SPI4_Init(void)
   /* USER CODE BEGIN SPI4_Init 2 */
 
   /* USER CODE END SPI4_Init 2 */
+
+}
+
+/**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
 
 }
 

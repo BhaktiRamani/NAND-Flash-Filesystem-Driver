@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "m78a_flash.h": "c",
+        "stm32f4xx_hal.h": "c"
+    }
+}
