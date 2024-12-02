@@ -28,6 +28,15 @@ int trial_page_addr = 0x33;
 uint8_t trial_data_byte1 = 0x00;
 uint8_t trial_data_byte2 = 0x00;
 
+#define W25N01GW_NO_OF_SEC		4 //No.of Sectors per page
+#define W25N01GW_NO_OF_PAGES	64//No.of Pages per block
+#define W25N01GW_NO_OF_BLOCKS	1024//No.of Blocks in variant W25N01GWTBIG
+#define W25N01GW_PAGE_SIZE 		(W25N01GW_NO_OF_SEC*W25N01GW_SECTOR_SIZE) //Size of the page
+#define W25N01GW_BLOCK_SIZE 	(W25N01GW_NO_OF_PAGES*W25N01GW_PAGE_SIZE) //Size of the block
+#define W25N01GW_FLASH_SIZE		(W25N01GW_BLOCK_SIZE*W25N01GW_NO_OF_BLOCKS) //Size of the flash
+#define W25N01GW_TOTAL_SECTORS	(W25N01GW_NO_OF_SEC*W25N01GW_NO_OF_PAGES*W25N01GW_NO_OF_BLOCKS) //Total no. of sectors
+#define W25N01GW_SECTORS_PER_BLOCK	(W25N01GW_NO_OF_PAGES*W25N01GW_NO_OF_SEC) //No. of sectors per block
+
 typedef enum {
 	WEL_BIT = (1 << 1),
 	OIP_BIT = (1 << 0),
@@ -63,16 +72,13 @@ void m78a_page_read(int block, int page, int column)
 	block = block >> 2;
 	temp <<= 6;
 	page = page | temp;
-	uint8_t transmit_commands_for_page_read[] = {CMD_PAGE_READ, CMD_DUMMY_BYTES, block, page};
-	uint8_t recieved_data_bytes[4] = {0};
+	uint8_t cmdBuffer[4] = {CMD_PAGE_READ, CMD_DUMMY_BYTES, block, page};
+	uint8_t recvBuffer[4] = {0};
 
-	spi(transmit_commands_for_page_read, recieved_data_bytes, 4, 0);
+	spi(cmdBuffer, recvBuffer, 4, 0);
 
 	//sending get command and status register address to check and recieving the contents of status register, polling the Operation in execution command to see if read is done(data from memory to cache is done)
-	// uint8_t dummy_buffer[2] = {CMD_GET_FEATURE, CMD_STATUS_REG}; // TX data
-	// uint8_t rx_data[2] = {}; // RX data
-	// spi(dummy_buffer, rx_data, 2, 2); // Perform SPI transmission
-	// while ((rx_data[0] & 1)); // Wait until the first bit of rx_data[0] is set
+
 	m78a_check_status_register(OIP_BIT);
 
 	//reading from cache register(data transferred from desired memory array to cache register, reading only 2 bytes for now)
@@ -80,13 +86,98 @@ void m78a_page_read(int block, int page, int column)
 	uint8_t dummy_and_colunm = column >> 8;
 	column = column & 0xFF;
 
-	uint8_t cache_buffer[] = {CMD_READ_FROM_CACHE, dummy_and_colunm, trial_column_addr, CMD_DUMMY_BYTES};
-	uint8_t cache_rx_buffer[2] = {0};
-	spi(cache_buffer, cache_rx_buffer, 4, 2); // Perform SPI transmission
+	uint8_t cmd_cache_buffer[] = {CMD_READ_FROM_CACHE, dummy_and_colunm, trial_column_addr, CMD_DUMMY_BYTES};
+	uint8_t recv_cache_buffer[2] = {0};
+	spi(cmd_cache_buffer, recv_cache_buffer, 4, 2); // Perform SPI transmission
 
 
 }
 
+
+int m78a_write(const uint8_t*dataPtr, uint32_t no_of_bytes_to_write, uint32_t write_loc)
+{
+	uint8_t cmdBuffer[4] = { 0 };
+    uint16_t pageNum=0,pageOff=0;
+    uint16_t wr_len_page = 0;
+    uint8_t dummy_byte = 0;
+    uint8_t tx_buf[3+128] = {0};
+    uint8_t reg_value=0;
+    uint16_t txn_off,txn_len = 0;
+
+	if(writeLoc==1)
+    {
+        reg_value=0;
+    }
+    if(dataPtr==NULL)
+    {
+        return -1;
+    }
+    if(noOfbytesToWrite==0)
+    {
+        return -1;
+    }
+    if(writeLoc>W25N01GW_FLASH_SIZE)
+    {
+        return -1;
+    }
+	while(noOfbytesToWrite>0)
+    {
+        pageNum = writeLoc/W25N01GW_PAGE_SIZE;
+        pageOff = writeLoc%W25N01GW_PAGE_SIZE;
+
+        wr_len_page = MIN(noOfbytesToWrite, W25N01GW_PAGE_SIZE+1 - pageOff);
+
+        if(wr_len_page!=W25N01GW_PAGE_SIZE)
+        {
+            /*If ECC is enabled */
+            W25N01GW_pageRead(pageNum);
+            tx_buf[0] = W25N01GW_CMD_RANDM_PRGM_DATA;
+        }
+        else
+        {
+            tx_buf[0] = W25N01GW_CMD_LD_PRGM_DATA;
+        }
+        /* Enable write */
+        cmdBuffer[0] = W25N01GW_CMD_WR_ENABLE;
+
+                nrf_drv_spi_transfer(&spi,&cmdBuffer[0],1,NULL,0);
+
+
+
+        /*Load the program into Databuffer*/
+           for (txn_off = 0, txn_len = 0; txn_off < wr_len_page;txn_off += txn_len)
+           {
+              txn_len = MIN(128, wr_len_page - txn_off);
+              tx_buf[1] = (pageOff + txn_off) >> 8;
+              tx_buf[2] = (pageOff + txn_off) & 0xff;
+              memcpy(tx_buf + 3, dataPtr, txn_len);
+              nrf_drv_spi_transfer(&spi,&tx_buf[0],3 + txn_len,NULL,0);
+              tx_buf[0] = W25N01GW_CMD_RANDM_PRGM_DATA;
+              dataPtr += txn_len;
+            }
+
+           /*Execute the program*/
+            cmdBuffer[0] = W25N01GW_CMD_PRGM_EXEC;
+            cmdBuffer[1] = dummy_byte;//Dummy byte
+            cmdBuffer[2] = ((pageNum >> 8) & 0xff);
+            cmdBuffer[3] = (pageNum & 0xff);
+
+            nrf_drv_spi_transfer(&spi,&cmdBuffer[0],4,NULL,0);
+
+            /*Wait until data is written to the flash*/
+            while((reg_value=W25N01GW_readReg(W25N01GW_STATUS_REG_ADDR))&W25N01GW_BUSY_STAT)
+            {
+                ;
+            }
+            if(reg_value&W25N01GW_PFAIL_STAT)
+            {
+                return W25N01GW_WRITE_FAILURE;
+            }
+
+           writeLoc += wr_len_page;
+           noOfbytesToWrite -= wr_len_page;
+    }
+}
 //passing the colunm in page and data buffer array to write at that address, will be sawved into cache register
 //pass colunm and 2 data bytes
 void m78a_program_load(int column, uint8_t *data_byte_buffer)
