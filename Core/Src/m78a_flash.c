@@ -20,9 +20,9 @@ uint8_t CMD_PROGRAM_EXECUTE = 0x10;
 uint8_t CMD_RANDM_PRGM_DATA = 0x84;
 uint8_t CMD_LD_PRGM_DATA = 0x02;
 
-int trial_column_addr = 0x11;
-int trial_block_addr = 0x22;
-int trial_page_addr = 0x33;
+int trial_column_addr = 0x00;
+int trial_block_addr = 0x00;
+int trial_page_addr = 0x00;
 uint8_t trial_data_byte1 = 0x00;
 uint8_t trial_data_byte2 = 0x00;
 
@@ -61,14 +61,40 @@ void m78a_init(SPI_HandleTypeDef *spih)
 	m78a_check_status_register(0xFF);
 	m78a_read(read_buffer, 2, 0x0000);
 	for(int i = 0; i< 100; i++);
-	// m78a_program_load(trial_column_addr,data_buffer );   //colunm, data
-	// m78a_program_execute(trial_block_addr, trial_page_addr);		//block, page
+	 m78a_program_load(trial_column_addr,data_buffer );   //colunm, data
+	 m78a_program_execute(trial_block_addr, trial_page_addr);		//block, page
 
-	//m78a_page_read(trial_block_addr, trial_page_addr, trial_page_addr);		//block, page, column
+	m78a_pageRead(trial_block_addr, trial_page_addr, trial_column_addr);		//block, page, column
 
 
 }
 
+m78a_pageRead(int block, int page, int column)
+{
+	//sending page read command, 8 dummy bytes for 8 clock cycle, bloack address, page address
+	 int temp = 0;
+	 temp = block & 0xF;
+	 block = block >> 2;
+	 temp <<= 6;
+	 page = page | temp;
+	uint8_t cmdBuffer[4] = {CMD_PAGE_READ, CMD_DUMMY_BYTES, block, page};
+	uint8_t recvBuffer[4] = {0};
+
+	spi(cmdBuffer, recvBuffer, 4, 0);
+
+	 //sending get command and status register address to check and recieving the contents of status register, polling the Operation in execution command to see if read is done(data from memory to cache is done)
+
+	m78a_check_status_register(OIP_BIT);
+
+	 //reading from cache register(data transferred from desired memory array to cache register, reading only 2 bytes for now)
+
+	 uint8_t dummy_and_colunm = column >> 8;
+	 column = column & 0xFF;
+
+	 uint8_t cmd_cache_buffer[] = {CMD_READ_FROM_CACHE, dummy_and_colunm, trial_column_addr, CMD_DUMMY_BYTES};
+	 uint8_t recv_cache_buffer[2] = {0};
+	 spi(cmd_cache_buffer, recv_cache_buffer, 4, 2); // Perform SPI transmission
+}
 
 //reads the memory data by transferring desired address locations's data to cache register
 void m78a_page_read(uint16_t pageNum)

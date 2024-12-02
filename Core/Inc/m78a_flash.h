@@ -27,6 +27,7 @@ void m78a_check_status_register(int number_of_bit);
 
 int m78a_write(const uint8_t* dataPtr, uint32_t noOfbytesToWrite, uint32_t writeLoc);
 int m78a_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, uint32_t readLoc);
+void m78a_pageRead(int block, int page, int column);
 
 void spi_recieve(uint8_t *recieve_data, int size);
 void spi_transmit(uint8_t *transmit_data, int size);
