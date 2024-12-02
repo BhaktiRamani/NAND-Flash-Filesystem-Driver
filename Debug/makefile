@@ -60,8 +60,8 @@ all: main-build
 main-build: flash_forward.elf secondary-outputs
 
 # Tool invocations
-flash_forward.elf flash_forward.map: $(OBJS) $(USER_OBJS) C:\Users\Bhakti\ Ramani\STM32CubeIDE\workspace_1.17.0\flash_forward\STM32F411VETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "flash_forward.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\Bhakti Ramani\STM32CubeIDE\workspace_1.17.0\flash_forward\STM32F411VETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="flash_forward.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+flash_forward.elf flash_forward.map: $(OBJS) $(USER_OBJS) C:\D\05_Classes\ESD\ESD_final_project\BhaktiRepo\flash_forward\STM32F411VETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "flash_forward.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\D\05_Classes\ESD\ESD_final_project\BhaktiRepo\flash_forward\STM32F411VETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="flash_forward.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
