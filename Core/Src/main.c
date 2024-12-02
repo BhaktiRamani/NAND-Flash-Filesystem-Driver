@@ -126,7 +126,8 @@ int main(void)
 
 
   /* USER CODE BEGIN 2 */
-  m78a_init(&hspi4);
+//  m78a_init(&hspi4);
+  W25N01GW_Init(&hspi4);
 
 //
 //  uint8_t tx_read_id_command[2] = {0xFF, 0x00};
