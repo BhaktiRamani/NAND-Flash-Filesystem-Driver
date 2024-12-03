@@ -19,6 +19,8 @@ uint8_t CMD_WRITE_ENABLE = 0x06;
 uint8_t CMD_PROGRAM_EXECUTE = 0x10;
 uint8_t CMD_RANDM_PRGM_DATA = 0x84;
 uint8_t CMD_LD_PRGM_DATA = 0x02;
+uint8_t CMD_SET_FEATURE = 0x1F;
+
 
 int trial_column_addr = 0x00;
 int trial_block_addr = 0x00;
@@ -35,6 +37,9 @@ uint8_t trial_data_byte2 = 0x00;
 #define M78A_FLASH_SIZE		(M78A_BLOCK_SIZE*M78A_NO_OF_BLOCKS) //Size of the flash
 #define M78A_TOTAL_SECTORS	(M78A_NO_OF_SEC*M78A_NO_OF_PAGES*M78A_NO_OF_BLOCKS) //Total no. of sectors
 #define M78A_SECTORS_PER_BLOCK	(M78A_NO_OF_PAGES*M78A_NO_OF_SEC) //No. of sectors per block
+#define m78a_RD_SREG_CMD_LEN 0x02
+#define m78a_MIN_RCV_BYTES_LEN 0x03
+#define m78a_PFAIL_STAT (1<<3)
 
 typedef enum {
 	WEL_BIT = (1 << 1),
@@ -45,33 +50,68 @@ typedef enum {
 
 SPI_HandleTypeDef spihandler;
 
-
+reg_contents_t reg;
 void m78a_init(SPI_HandleTypeDef *spih)
 {
 	spihandler = *spih;
 	device_info_t info;  // Allocate on stack
+
 	m78a_read_device_manufacturar_id(&info);  // Pass the address of the struct
 
-    m78a_check_status_register(0xFF);
-//   m78a_check_status_register(OIP_BIT);
-	//for(int i = 0; i<100; i++);
-//	uint8_t data_buffer[4];
-//	memset(data_buffer,  0xAA, 2);
-//	uint8_t read_buffer[4] = {0};
-//	m78a_write(data_buffer, 2, 0x0000);
-//	for(int i = 0; i<100; i++);
-//	m78a_check_status_register(0xFF);
-//	m78a_read(read_buffer, 2, 0x0000);
+	//setting the protect register to access all the regions (making it unprotected)
+	m78a_writeReg(m78a_PROTECT_REG_ADDR, 0x00);
+
+	//reading the config register value and then just setting the ECEE bit
+	uint8_t reg_val = m78a_readReg(m78a_CONFIG_REG_ADDR, &reg);
+	m78a_writeReg(m78a_CONFIG_REG_ADDR, (reg_val | (1 << 4)));
+
+	//reading the status register for any errors , checking all registers before starting
+    m78a_readReg(m78a_STATUS_REG_ADDR, &reg);
+    m78a_readReg(m78a_PROTECT_REG_ADDR, &reg);
+    m78a_readReg(m78a_CONFIG_REG_ADDR, &reg);
+
+
+	uint8_t data_buffer[4] = {0xab, 0xbc, 0xcd, 0xef};
+
+	uint8_t read_buffer[4] = {0};
+	m78a_write(data_buffer, 2, 0x0010);
+	m78a_read(read_buffer, 2, 0x0010);
 //	for(int i = 0; i< 100; i++);
 //	 m78a_program_load(trial_column_addr,data_buffer );   //colunm, data
 //	 m78a_program_execute(trial_block_addr, trial_page_addr);		//block, page
 
-	m78a_pageRead(trial_block_addr, trial_page_addr, trial_column_addr);		//block, page, column
+	//m78a_pageRead(trial_block_addr, trial_page_addr, trial_column_addr);		//block, page, column
+
+}
+uint8_t m78a_readReg(m78a_reg_t reg_addr, reg_contents_t *reg)
+{
+    uint8_t cmdBuffer[m78a_RD_SREG_CMD_LEN] = { 0 };
+    uint8_t recv_buff[m78a_MIN_RCV_BYTES_LEN] = {0};
+
+    cmdBuffer[0] = CMD_GET_FEATURE;
+    cmdBuffer[1] = reg_addr;
+
+    spi(cmdBuffer,&recv_buff[0],m78a_RD_SREG_CMD_LEN,m78a_MIN_RCV_BYTES_LEN);
+    reg->reg_contents = recv_buff[0];
+    return recv_buff[m78a_MIN_RCV_BYTES_LEN-1];
 
 
 }
 
-m78a_pageRead(int block, int page, int column)
+
+void m78a_writeReg(m78a_reg_t reg,uint8_t reg_value)
+{
+    uint8_t cmdBuffer[3] = { 0 };
+
+    cmdBuffer[0] = CMD_SET_FEATURE;
+    cmdBuffer[1] = reg;
+    cmdBuffer[2] = reg_value;
+
+
+    spi(&cmdBuffer[0],NULL,3,0);
+
+}
+void m78a_pageRead(int block, int page, int column)
 {
 	//sending page read command, 8 dummy bytes for 8 clock cycle, bloack address, page address
 	 int temp = 0;
@@ -101,40 +141,28 @@ m78a_pageRead(int block, int page, int column)
 //reads the memory data by transferring desired address locations's data to cache register
 void m78a_page_read(uint16_t pageNum)
 {
-	//sending page read command, 8 dummy bytes for 8 clock cycle, bloack address, page address
-	// int temp = 0;
-	// temp = block & 0xF;
-	// block = block >> 2;
-	// temp <<= 6;
-	// page = page | temp;
+
 	uint8_t cmdBuffer[4] = {CMD_PAGE_READ, CMD_DUMMY_BYTES, ((pageNum >> 8) & 0xff), (pageNum & 0xff)};
 	uint8_t recvBuffer[4] = {0};
 
 	spi(cmdBuffer, recvBuffer, 4, 0);
+	while((m78a_readReg(m78a_STATUS_REG_ADDR, &reg)) & (1 << 0))
+	{
+		;
+	}
 
-	// sending get command and status register address to check and recieving the contents of status register, polling the Operation in execution command to see if read is done(data from memory to cache is done)
-
-	//m78a_check_status_register(OIP_BIT);
-
-	// //reading from cache register(data transferred from desired memory array to cache register, reading only 2 bytes for now)
-
-	// uint8_t dummy_and_colunm = column >> 8;
-	// column = column & 0xFF;
-
-	// uint8_t cmd_cache_buffer[] = {CMD_READ_FROM_CACHE, dummy_and_colunm, trial_column_addr, CMD_DUMMY_BYTES};
-	// uint8_t recv_cache_buffer[2] = {0};
-	// spi(cmd_cache_buffer, recv_cache_buffer, 4, 2); // Perform SPI transmission
+	return 1;
 
 
 }
 
 int m78a_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, uint32_t readLoc)
 {
-    uint8_t cmdBuffer[4] = { 0 };
+    uint8_t cmdBuffer[4] = {0};
     uint16_t pageNum=0,pageOff=0;
     uint16_t rd_len_page = 0;
     uint8_t rd_len = 0;
-    uint8_t dummy_byte=0,reg_val = 0;
+    uint8_t dummy_byte=0;
 
     uint8_t rcv_buff[256] = {0};
 
@@ -159,9 +187,10 @@ int m78a_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, uint32_t readLoc)
 
         rd_len_page = MIN(noOfbytesToRead, M78A_PAGE_SIZE-pageOff+1);
 
-        /*Page read*/
+        /*Page read, program Load operation*/
         m78a_page_read(pageNum);
 
+        /*program execute operation*/
         /* Read to the data buffer*/
         cmdBuffer[0] = CMD_READ_FROM_CACHE;
         cmdBuffer[3] = dummy_byte;
@@ -174,7 +203,7 @@ int m78a_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, uint32_t readLoc)
             rd_len = MIN(rd_len_page,251);//Since every read cycle has four dummy bytes added in front.
             //Driver supports maximum reading of 256 bytes. Hence update the page Offset and read 256 bytes in a cycle.
 			spi(cmdBuffer, rcv_buff, 4, rd_len + 4);
-            //nrf_drv_spi_transfer(&spi,&cmdBuffer[0],4,rcv_buff,rd_len+4);
+
             memcpy(dataPtr,&rcv_buff[4],rd_len);
             rd_len_page -= rd_len;
             pageOff += rd_len;
@@ -183,12 +212,8 @@ int m78a_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, uint32_t readLoc)
         }
 
     }
-	//m78a_check_status_register(CRBSY);
-    //reg_val = M78A_readReg(M78A_STATUS_REG_ADDR);
-    // if((reg_val&M78A_ECC0_STAT)||(reg_val&M78A_ECC0_STAT))
-    // {
-    //     return M78A_ECC_FAILURE;
-    // }
+    m78a_readReg(m78a_STATUS_REG_ADDR, &reg);
+
     return 1;
 }
 
@@ -203,6 +228,7 @@ int m78a_write(const uint8_t* dataPtr, uint32_t noOfbytesToWrite, uint32_t write
 	uint8_t rx_dummy_buff[] = {0};
     uint8_t reg_value=0;
     uint16_t txn_off,txn_len = 0;
+    uint8_t reg_val = 0;
 
 
     if(writeLoc==1)
@@ -232,7 +258,7 @@ int m78a_write(const uint8_t* dataPtr, uint32_t noOfbytesToWrite, uint32_t write
         if(wr_len_page!=M78A_PAGE_SIZE)
         {
             /*If ECC is enabled */
-            //M78A_pageRead(pageNum);
+            m78a_page_read(pageNum);
             tx_buf[0] = CMD_RANDM_PRGM_DATA;
         }
         else
@@ -240,10 +266,13 @@ int m78a_write(const uint8_t* dataPtr, uint32_t noOfbytesToWrite, uint32_t write
             tx_buf[0] = CMD_LD_PRGM_DATA;
         }
         /* Enable write */
-        // cmdBuffer[0] = M78A_CMD_WR_ENABLE;
 
-        //     nrf_drv_spi_transfer(&spi,&cmdBuffer[0],1,NULL,0);
-			m78a_write_enable();
+
+
+//		m78a_write_enable();
+        reg_val = m78a_readReg(m78a_STATUS_REG_ADDR, &reg);
+        m78a_writeReg(m78a_STATUS_REG_ADDR, (reg_val | (1 << 1)) );
+        m78a_readReg(m78a_STATUS_REG_ADDR, &reg);
 
 
 
@@ -255,7 +284,7 @@ int m78a_write(const uint8_t* dataPtr, uint32_t noOfbytesToWrite, uint32_t write
               tx_buf[2] = (pageOff + txn_off) & 0xff;
               memcpy(tx_buf + 3, dataPtr, txn_len);
 			  spi(tx_buf, rx_dummy_buff, 3 + txn_len, 0 );
-              //nrf_drv_spi_transfer(&spi,&tx_buf[0],3 + txn_len,NULL,0);
+
               tx_buf[0] = CMD_RANDM_PRGM_DATA;
               dataPtr += txn_len;
             }
@@ -267,19 +296,18 @@ int m78a_write(const uint8_t* dataPtr, uint32_t noOfbytesToWrite, uint32_t write
             cmdBuffer[3] = (pageNum & 0xff);
 
 //            nrf_drv_spi_transfer(&spi,&cmdBuffer[0],4,NULL,0);
-			spi(cmdBuffer, rx_dummy_buff, 4, 0 );
+			spi(cmdBuffer, NULL, 4, 0 );
 
 
             /*Wait until data is written to the flash*/
-		    //m78a_check_status_register(OIP_BIT);
-            // while((reg_value=W25N01GW_readReg(W25N01GW_STATUS_REG_ADDR))&W25N01GW_BUSY_STAT)
-            // {
-            //     ;
-            // }
-            // if(reg_value&M78A_PFAIL_STAT)
-            // {
-            //     return -1;
-            // }
+			while((reg_value = m78a_readReg(m78a_STATUS_REG_ADDR, &reg)) & (1 << 0))
+			{
+				;
+			}
+            if(reg_value&m78a_PFAIL_STAT)
+            {
+                return -1;
+            }
 
            writeLoc += wr_len_page;
            noOfbytesToWrite -= wr_len_page;
