@@ -17,7 +17,11 @@
 
 #define MIN(a, b) (a < b ? a : b)
 
-void m78a_read_device_manufacturar_id();
+typedef struct{
+	uint8_t manufacturar_id;
+	uint8_t voltage_spec;
+}device_info_t;
+void m78a_read_device_manufacturar_id(device_info_t *info);
 void m78a_init(SPI_HandleTypeDef *spih);
 void m78a_page_read(uint16_t pageNum);
 void m78a_program_load(int column, uint8_t *data_byte_buffer);

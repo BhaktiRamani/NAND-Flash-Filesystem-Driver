@@ -49,20 +49,22 @@ SPI_HandleTypeDef spihandler;
 void m78a_init(SPI_HandleTypeDef *spih)
 {
 	spihandler = *spih;
-	m78a_read_device_manufacturar_id();
+	device_info_t info;  // Allocate on stack
+	m78a_read_device_manufacturar_id(&info);  // Pass the address of the struct
+
     m78a_check_status_register(0xFF);
 //   m78a_check_status_register(OIP_BIT);
 	//for(int i = 0; i<100; i++);
-	uint8_t data_buffer[4];
-	memset(data_buffer,  0xAA, 2);
-	uint8_t read_buffer[4] = {0};
-	m78a_write(data_buffer, 2, 0x0000);
-	for(int i = 0; i<100; i++);
-	m78a_check_status_register(0xFF);
-	m78a_read(read_buffer, 2, 0x0000);
-	for(int i = 0; i< 100; i++);
-	 m78a_program_load(trial_column_addr,data_buffer );   //colunm, data
-	 m78a_program_execute(trial_block_addr, trial_page_addr);		//block, page
+//	uint8_t data_buffer[4];
+//	memset(data_buffer,  0xAA, 2);
+//	uint8_t read_buffer[4] = {0};
+//	m78a_write(data_buffer, 2, 0x0000);
+//	for(int i = 0; i<100; i++);
+//	m78a_check_status_register(0xFF);
+//	m78a_read(read_buffer, 2, 0x0000);
+//	for(int i = 0; i< 100; i++);
+//	 m78a_program_load(trial_column_addr,data_buffer );   //colunm, data
+//	 m78a_program_execute(trial_block_addr, trial_page_addr);		//block, page
 
 	m78a_pageRead(trial_block_addr, trial_page_addr, trial_column_addr);		//block, page, column
 
@@ -373,12 +375,16 @@ void m78a_write_enable(void)
 	m78a_check_status_register(WEL_BIT);
 
 }
-void m78a_read_device_manufacturar_id()
+void m78a_read_device_manufacturar_id(device_info_t *info)
 {
 	uint8_t transmit_commands_for_device_id[2] = {CMD_READ_DEVICE_ID, CMD_DUMMY_BYTES};
-	uint8_t recieved_device_id[2] = {0};
+	uint8_t rcv_buffer[2] = {0};
 
-	spi(transmit_commands_for_device_id, recieved_device_id, 2, 2);
+
+	spi(transmit_commands_for_device_id, rcv_buffer, 2, 2);
+	info -> manufacturar_id = rcv_buffer[0];
+	info -> voltage_spec = rcv_buffer[1];
+
 }
 /* Timeout value for SPI operations in milliseconds */
 #define SPI_TIMEOUT 1000
