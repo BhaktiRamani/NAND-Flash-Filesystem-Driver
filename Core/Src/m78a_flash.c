@@ -7,11 +7,6 @@
 
 #include "m78a_flash.h"
 
-#define SPI_INSTANCE  2                                           /**< SPI instance index. */
-//static const nrf_drv_spi_t spi = {.inst_idx = 3,.use_easy_dma=true};
-// static const nrf_drv_spi_t spi = NRF_DRV_SPI_INSTANCE(SPI_INSTANCE);
-// nrf_drv_spi_config_t spi_config_flash = NRF_DRV_SPI_DEFAULT_CONFIG;
-static volatile bool spi_xfer_done;
 
 
 uint8_t CMD_READ_DEVICE_ID = 0x9F;
@@ -79,13 +74,13 @@ void m78a_init(SPI_HandleTypeDef *spih)
 	uint8_t data_buffer[4] = {0xab, 0xbc, 0xcd, 0xef};
 
 	uint8_t read_buffer[4] = {0};
-	m78a_write(data_buffer, 2, 0x0010);
-	m78a_read(read_buffer, 2, 0x0010);
+//	m78a_write(data_buffer, 2, 0x0010);
+//	m78a_read(read_buffer, 2, 0x0010);
 //	for(int i = 0; i< 100; i++);
-//	 m78a_program_load(trial_column_addr,data_buffer );   //colunm, data
-//	 m78a_program_execute(trial_block_addr, trial_page_addr);		//block, page
+	 m78a_program_load(trial_column_addr,data_buffer );   //colunm, data
+	 m78a_program_execute(trial_block_addr, trial_page_addr);		//block, page
 
-	//m78a_pageRead(trial_block_addr, trial_page_addr, trial_column_addr);		//block, page, column
+	m78a_pageRead(trial_block_addr, trial_page_addr, trial_column_addr);		//block, page, column
 
 }
 uint8_t m78a_readReg(m78a_reg_t reg_addr, reg_contents_t *reg)
@@ -100,16 +95,6 @@ uint8_t m78a_readReg(m78a_reg_t reg_addr, reg_contents_t *reg)
     reg->reg_contents = recv_buff[0];
     return recv_buff[m78a_MIN_RCV_BYTES_LEN-1];
 
-    /*Wait until all the device is powered up */
-//    while((W25N01GW_readReg(W25N01GW_STATUS_REG_ADDR))&W25N01GW_BUSY_STAT)
-//    {
-//        ;
-//    }
-    W25N01GW_getManufactureAndDevId(&info);
-	W25N01GW_init_protect_reg();
-	W25N01GW_write(&data_buffer[0], 2, 0x0000);
-	W25N01GW_read(&read_buffer[0], 2, 0x0000);
-//
 
 }
 
@@ -128,10 +113,33 @@ void m78a_writeReg(m78a_reg_t reg,uint8_t reg_value)
 }
 void m78a_pageRead(int block, int page, int column)
 {
-    /*Initalise the Protection register*/
-	W25N01GW_writeReg(W25N01GW_PROTECT_REG_ADDR, 0);
+	//sending page read command, 8 dummy bytes for 8 clock cycle, bloack address, page address
+	 int temp = 0;
+	 temp = block & 0xF;
+	 block = block >> 2;
+	 temp <<= 6;
+	 page = page | temp;
+	uint8_t cmdBuffer[4] = {CMD_PAGE_READ, CMD_DUMMY_BYTES, block, page};
+	uint8_t recvBuffer[4] = {0};
+
+	spi(cmdBuffer, recvBuffer, 4, 0);
+
+	 //sending get command and status register address to check and recieving the contents of status register, polling the Operation in execution command to see if read is done(data from memory to cache is done)
+
+	m78a_check_status_register(OIP_BIT);
+
+	 //reading from cache register(data transferred from desired memory array to cache register, reading only 2 bytes for now)
+
+	 uint8_t dummy_and_colunm = column >> 8;
+	 column = column & 0xFF;
+
+	 uint8_t cmd_cache_buffer[] = {CMD_READ_FROM_CACHE, dummy_and_colunm, trial_column_addr, CMD_DUMMY_BYTES};
+	 uint8_t recv_cache_buffer[2] = {0};
+	 spi(cmd_cache_buffer, recv_cache_buffer, 4, 2); // Perform SPI transmission
 }
-uint8_t W25N01GW_readReg(W25N01GW_reg_t reg)
+
+//reads the memory data by transferring desired address locations's data to cache register
+void m78a_page_read(uint16_t pageNum)
 {
 
 	uint8_t cmdBuffer[4] = {CMD_PAGE_READ, CMD_DUMMY_BYTES, ((pageNum >> 8) & 0xff), (pageNum & 0xff)};
@@ -143,135 +151,12 @@ uint8_t W25N01GW_readReg(W25N01GW_reg_t reg)
 		;
 	}
 
-	return 1;
-
-    return recv_buff[W25N01GW_MIN_RCV_BYTES_LEN-1];
-
-}
 
 
-void W25N01GW_writeReg(W25N01GW_reg_t reg,uint8_t reg_value)
-{
-    uint8_t cmdBuffer[3] = { 0 };
-
-    cmdBuffer[0] = W25N01GW_CMD_WR_REG;
-    cmdBuffer[1] = reg;
-    cmdBuffer[2] = reg_value;
-
-    spi(&cmdBuffer[0],3,NULL,0);
 
 }
 
-W25N01GW_errorCode_t W25N01GW_eraseBlock(uint32_t pos,uint32_t len)
-{
-    uint8_t cmdBuffer[4] = { 0 };
-
-    W25N01GW_errorCode_t res = W25N01GW_ERROR;
-    uint16_t pageNum = 0;
-    uint8_t reg_value = 0;
-    pos = pos-1;
-
-    if (pos%W25N01GW_BLOCK_SIZE != 0 || len%W25N01GW_BLOCK_SIZE != 0) {
-        res = W25N01GW_ERR_LOCATION_INVALID;
-        return res;
-      }
-    while(len>0)
-    {
-        pageNum = pos/W25N01GW_PAGE_SIZE;
-
-        /* Enable write */
-        cmdBuffer[0] = W25N01GW_CMD_WR_ENABLE;
-
-       spi(cmdBuffer[0],1,NULL,0);
-
-
-        /*Block Erase*/
-        cmdBuffer[0] = W25N01GW_CMD_128KB_BLCK_ERASE;
-        cmdBuffer[1] = 0; // Dummy Cycle
-        cmdBuffer[2] = ((pageNum >> 8) & 0xff);     //Page Address
-        cmdBuffer[3] = (pageNum & 0xff);        //Page Address
-
-        spi(&cmdBuffer[0],4,NULL,0);
-
-        /*Wait until all the requested blocks are erase*/
-        while((reg_value=W25N01GW_readReg(W25N01GW_STATUS_REG_ADDR))&W25N01GW_BUSY_STAT)
-        {
-            ;
-        }
-
-        if((reg_value&W25N01GW_PFAIL_STAT)||(reg_value&W25N01GW_EFAIL_STAT))
-        {
-            return W25N01GW_ERASE_FAILURE;
-        }
-
-        pos += W25N01GW_BLOCK_SIZE;
-        len -= W25N01GW_BLOCK_SIZE;
-
-    }
-
-    res = W25N01GW_ERASE_SUCCESS;
-    return res;
-
-}
-
-
-W25N01GW_errorCode_t W25N01GW_pageRead(uint16_t pageNum)
-{
-    uint8_t dummy_byte=0;
-    uint8_t cmdBuffer[4] = { 0 };
-
-    cmdBuffer[0] = W25N01GW_CMD_PAGE_DATA_RD;
-    cmdBuffer[1] = dummy_byte;
-    cmdBuffer[2] = ((pageNum >> 8) & 0xff);     //Page Address
-    cmdBuffer[3] = (pageNum & 0xff);        //Page Address
-
-    spi(&cmdBuffer[0],4,NULL,0);
-
-    /*Wait until Ready*/
-    while(W25N01GW_readReg(W25N01GW_STATUS_REG_ADDR)&W25N01GW_BUSY_STAT)
-    {
-        ;
-    }
-    return W25N01GW_READ_SUCCESS;
-}
-
-W25N01GW_errorCode_t W25N01GW_read_spare(uint8_t* dataPtr,int8_t noOfbytesToRead,uint16_t pageNum,uint16_t pageOff)
-{
-    uint8_t cmdBuffer[4] = { 0 };
-
-    uint8_t dummy_byte=0,reg_val = 0;
-
-    uint8_t rcv_buff[256] = {0};
-
-    if(dataPtr==NULL)
-    {
-        return W25N01GW_ERR_BUFFER_INVALID;
-    }
-    if(noOfbytesToRead==0)
-    {
-        return W25N01GW_ERR_BYTE_LEN_INVALID;
-    }
-    /*Page read*/
-    W25N01GW_pageRead(pageNum);
-    /* Read to the data buffer*/
-    cmdBuffer[0] = W25N01GW_CMD_RD_DATA;
-    cmdBuffer[3] = dummy_byte;
-    cmdBuffer[1] = ((pageOff >> 8) & 0xff);
-    cmdBuffer[2] = (pageOff & 0xff);
-
-    spi(&cmdBuffer[0],4,rcv_buff,noOfbytesToRead+4);
-
-    memcpy(dataPtr,&rcv_buff[4],noOfbytesToRead);
-    reg_val = W25N01GW_readReg(W25N01GW_STATUS_REG_ADDR);
-    if((reg_val&W25N01GW_ECC0_STAT)||(reg_val&W25N01GW_ECC0_STAT))
-    {
-        return W25N01GW_ECC_FAILURE;
-    }
-    return W25N01GW_READ_SUCCESS;
-
-}
-
-W25N01GW_errorCode_t W25N01GW_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, uint32_t readLoc)
+int m78a_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, uint32_t readLoc)
 {
     uint8_t cmdBuffer[4] = {0};
     uint16_t pageNum=0,pageOff=0;
@@ -283,31 +168,31 @@ W25N01GW_errorCode_t W25N01GW_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, u
 
     if(dataPtr==NULL)
     {
-        return W25N01GW_ERR_BUFFER_INVALID;
+        return -1;
     }
     if(noOfbytesToRead==0)
     {
-        return W25N01GW_ERR_BYTE_LEN_INVALID;
+        return -1;
     }
-    if(readLoc>W25N01GW_FLASH_SIZE)
+    if(readLoc>M78A_FLASH_SIZE)
     {
-        return W25N01GW_ERR_LOCATION_INVALID;
+        return -1;
     }
 
     while(noOfbytesToRead>0)
     {
-        //if(W25N01GW_readReg(W25N01GW_CONFIG_REG_ADDR)&W25N01GW_REG_CONF_ECCE) // Check if ECC-E flag is set. If set page size is 1024 else page size is 2048+64, as the bytes used to store
-        pageNum = readLoc/(W25N01GW_PAGE_SIZE);
-        pageOff = readLoc%(W25N01GW_PAGE_SIZE);
+        //if(M78A_readReg(M78A_CONFIG_REG_ADDR)&M78A_REG_CONF_ECCE) // Check if ECC-E flag is set. If set page size is 1024 else page size is 2048+64, as the bytes used to store
+        pageNum = readLoc/(M78A_PAGE_SIZE);
+        pageOff = readLoc%(M78A_PAGE_SIZE);
 
-        rd_len_page = MIN(noOfbytesToRead, W25N01GW_PAGE_SIZE-pageOff+1);
+        rd_len_page = MIN(noOfbytesToRead, M78A_PAGE_SIZE-pageOff+1);
 
         /*Page read, program Load operation*/
         m78a_page_read(pageNum);
 
         /*program execute operation*/
         /* Read to the data buffer*/
-        cmdBuffer[0] = W25N01GW_CMD_RD_DATA;
+        cmdBuffer[0] = CMD_READ_FROM_CACHE;
         cmdBuffer[3] = dummy_byte;
 
         while(rd_len_page>0)
@@ -319,7 +204,7 @@ W25N01GW_errorCode_t W25N01GW_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, u
             //Driver supports maximum reading of 256 bytes. Hence update the page Offset and read 256 bytes in a cycle.
 			spi(cmdBuffer, rcv_buff, 4, rd_len + 4);
 
-            memcpy(dataPtr,&rcv_buff[4],rd_len);
+            memcpy(dataPtr,&rcv_buff,rd_len);
             rd_len_page -= rd_len;
             pageOff += rd_len;
             noOfbytesToRead -=rd_len;
@@ -333,14 +218,14 @@ W25N01GW_errorCode_t W25N01GW_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, u
 }
 
 
-
-W25N01GW_errorCode_t W25N01GW_write(const uint8_t* dataPtr, uint32_t noOfbytesToWrite, uint32_t writeLoc)
+int m78a_write(const uint8_t* dataPtr, uint32_t noOfbytesToWrite, uint32_t writeLoc)
 {
     uint8_t cmdBuffer[4] = { 0 };
     uint16_t pageNum=0,pageOff=0;
     uint16_t wr_len_page = 0;
     uint8_t dummy_byte = 0;
     uint8_t tx_buf[3+128] = {0};
+	uint8_t rx_dummy_buff[] = {0};
     uint8_t reg_value=0;
     uint16_t txn_off,txn_len = 0;
     uint8_t reg_val = 0;
@@ -349,27 +234,28 @@ W25N01GW_errorCode_t W25N01GW_write(const uint8_t* dataPtr, uint32_t noOfbytesTo
     if(writeLoc==1)
     {
         reg_value=0;
+        (void)reg_value;
     }
     if(dataPtr==NULL)
     {
-        return W25N01GW_ERR_BUFFER_INVALID;
+        return -1;
     }
     if(noOfbytesToWrite==0)
     {
-        return W25N01GW_ERR_BYTE_LEN_INVALID;
+        return -1;
     }
-    if(writeLoc>W25N01GW_FLASH_SIZE)
+    if(writeLoc>M78A_FLASH_SIZE)
     {
-        return W25N01GW_ERR_LOCATION_INVALID;
+        return -1;
     }
     while(noOfbytesToWrite>0)
     {
-        pageNum = writeLoc/W25N01GW_PAGE_SIZE;
-        pageOff = writeLoc%W25N01GW_PAGE_SIZE;
+        pageNum = writeLoc/M78A_PAGE_SIZE;
+        pageOff = writeLoc%M78A_PAGE_SIZE;
 
-        wr_len_page = MIN(noOfbytesToWrite, W25N01GW_PAGE_SIZE+1 - pageOff);
+        wr_len_page = MIN(noOfbytesToWrite, M78A_PAGE_SIZE+1 - pageOff);
 
-        if(wr_len_page!=W25N01GW_PAGE_SIZE)
+        if(wr_len_page!=M78A_PAGE_SIZE)
         {
             /*If ECC is enabled */
             m78a_page_read(pageNum);
@@ -377,16 +263,16 @@ W25N01GW_errorCode_t W25N01GW_write(const uint8_t* dataPtr, uint32_t noOfbytesTo
         }
         else
         {
-            tx_buf[0] = W25N01GW_CMD_LD_PRGM_DATA;
+            tx_buf[0] = CMD_LD_PRGM_DATA;
         }
         /* Enable write */
 
 
 
-//		m78a_write_enable();
-        reg_val = m78a_readReg(m78a_STATUS_REG_ADDR, &reg);
-        m78a_writeReg(m78a_STATUS_REG_ADDR, (reg_val | (1 << 1)) );
-        m78a_readReg(m78a_STATUS_REG_ADDR, &reg);
+		m78a_write_enable();
+//        reg_val = m78a_readReg(m78a_STATUS_REG_ADDR, &reg);
+//        m78a_writeReg(m78a_STATUS_REG_ADDR, (reg_val | (1 << 1)) );
+//        m78a_readReg(m78a_STATUS_REG_ADDR, &reg);
 
 
 
@@ -404,7 +290,7 @@ W25N01GW_errorCode_t W25N01GW_write(const uint8_t* dataPtr, uint32_t noOfbytesTo
             }
 
            /*Execute the program*/
-            cmdBuffer[0] = W25N01GW_CMD_PRGM_EXEC;
+            cmdBuffer[0] = CMD_PROGRAM_EXECUTE;
             cmdBuffer[1] = dummy_byte;//Dummy byte
             cmdBuffer[2] = ((pageNum >> 8) & 0xff);
             cmdBuffer[3] = (pageNum & 0xff);
@@ -427,40 +313,94 @@ W25N01GW_errorCode_t W25N01GW_write(const uint8_t* dataPtr, uint32_t noOfbytesTo
            noOfbytesToWrite -= wr_len_page;
     }
 
-    return W25N01GW_WRITE_SUCCESS;
+    return 1;
+}
+//passing the colunm in page and data buffer array to write at that address, will be sawved into cache register
+//pass colunm and 2 data bytes
+void m78a_program_load(int column, uint8_t *data_byte_buffer)
+{
+	m78a_write_enable();
+	//Sending the command for program load, dummy bits , plane bit(0), 12 column address bits and data buffer
+    uint8_t dummy_and_colunm = column >> 8;
+	column = column & 0xFF;
+	uint8_t program_load_cmd_buffer[] = {CMD_LD_PRGM_DATA, dummy_and_colunm, column };
+	uint8_t dummy_buffer[0];
+	spi(program_load_cmd_buffer, dummy_buffer, 3 , 0);
+	spi(data_byte_buffer, dummy_buffer, 2047, 0);
 }
 
-void W25N01GW_getManufactureAndDevId(W25N01GW_deviceInfo_t* info)
+//transferring from cache register to
+//pass block and page address to write it
+void m78a_program_execute(int block, int page)
 {
-    uint8_t cmdBuffer[2] = { 0 };
-    uint8_t dummy_byte = 0;
-    uint8_t recv_buff[5];
-    /*TOBE REMOVED*/
-    cmdBuffer[0] = W25N01GW_CMD_JDEC_ID;
-    cmdBuffer[1] = dummy_byte;
+	int temp = 0;
+	temp = block & 0xF;
+	block = block >> 2;
+	temp <<= 6;
+	page = page | temp;
+	uint8_t program_execute_cmd_buffer[] = {CMD_PROGRAM_EXECUTE, CMD_DUMMY_BYTES,  block, page};
+	uint8_t recieved_data_bytes[4] = {0};
 
-    memset(recv_buff,0,5);
-    spi(&cmdBuffer[0],W25N01GW_RD_SREG_CMD_LEN,&recv_buff[0],5);
+	spi(program_execute_cmd_buffer, recieved_data_bytes, 4, 0);
 
-    info->mfgId = recv_buff[2];
-    info->deviceId = recv_buff[3] << 8 | recv_buff[4];
+	//sending get command and status register address to check and recieving the contents of status register, polling the Operation in execution command to see if read is done(data from memory to cache is done)
+	m78a_check_status_register(OIP_BIT);
+
+
 
 }
 
-W25N01GW_errorCode_t W25N01GW_getDeviceInitStatus()
+//OIP bit = 0 means device is ready for nextr command
+//WEL bit = 1 means device is ready for write operations in memory
+void m78a_check_status_register(int number_of_bit)
 {
-    return W25N01GW_initStatus;
+	uint8_t status_reg_check_cmd_buffer[2] = {CMD_GET_FEATURE, CMD_STATUS_REG};  // TX commands
+	uint8_t recieved_state_status_reg[2] = {}; // Recieved_state of status register
+	spi(status_reg_check_cmd_buffer, recieved_state_status_reg, 2, 2); // Perform SPI transmission
+
+	switch(number_of_bit)
+	{
+
+		case WEL_BIT:
+			while(!(recieved_state_status_reg[0] & WEL_BIT));
+
+			break;
+
+		case OIP_BIT:
+//			int time = 1000;
+//			while((recieved_state_status_reg[0] & OIP_BIT) && (time != 0 )) //bit not set
+//			{
+//				time = time - 1;
+//			}
+			while(recieved_state_status_reg[0] & OIP_BIT)
+			{
+				;
+			}
+		case CRBSY:
+			while(recieved_state_status_reg[0] & CRBSY)
+			{
+				;
+			}
+
+
+
+			//retransmitting the status register and reading its contents to varify if OIP bit is actually free
+			//spi(status_reg_check_cmd_buffer, recieved_state_status_reg, 2, 2); // Perform SPI transmission
+
+			break;
+		case CONTENTS_OUT:
+			break;
+		default:
+			break;
+	}
 }
 
-void  W25N01GW_getMemoryParams(W25N01GW_memoryParams_t* flashMemoryParams)
+
+void m78a_write_enable(void)
 {
-
-
-    /* Get the memorySize from the macro defined for the flash module */
-        flashMemoryParams->eraseBlockUnits = 1;
-        flashMemoryParams->memorySize = W25N01GW_FLASH_SIZE;
-        flashMemoryParams->noOfSectors = W25N01GW_TOTAL_SECTORS;
-        flashMemoryParams->sectorSize = W25N01GW_SECTOR_SIZE;
+	//sending write enable and polling the status register to check if WEL bit is actually set
+	spi(&CMD_WRITE_ENABLE, &CMD_DUMMY_BYTES, 1, 0);
+	m78a_check_status_register(WEL_BIT);
 
 }
 void m78a_read_device_manufacturar_id(device_info_t *info)
@@ -548,17 +488,11 @@ void spi_recieve(uint8_t *recieve_data, int size)
  * 4. Small delay for stability
  * 5. Disables SPI by de-asserting CS
  */
-void spi(uint8_t *transmit_data,  int transmit_size, uint8_t *recieve_data,int recieve_size)
+void spi(uint8_t *transmit_data, uint8_t *recieve_data, int transmit_size, int recieve_size)
 {
     spi_enable();                          /* Assert CS */
-    if(transmit_data!=NULL)
-    {
-    	HAL_SPI_Transmit(&spihandler, transmit_data, transmit_size, SPI_TIMEOUT);
-    }
-    if(recieve_data!=NULL)
-    {
-        spi_recieve(recieve_data, recieve_size);      /* Receive data */
-    }
+    spi_transmit(transmit_data, transmit_size);   /* Send data */
+    spi_recieve(recieve_data, recieve_size);      /* Receive data */
     for(int i = 0; i< 100; i++);          /* Short delay for stability */
     spi_disable();                         /* De-assert CS */
 }

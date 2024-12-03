@@ -126,8 +126,8 @@ int main(void)
 
 
   /* USER CODE BEGIN 2 */
-//  m78a_init(&hspi4);
-  W25N01GW_Init(&hspi4);
+  m78a_init(&hspi4);
+
 
 
 //
