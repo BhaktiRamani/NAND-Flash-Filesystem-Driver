@@ -20,6 +20,7 @@ uint8_t CMD_PROGRAM_EXECUTE = 0x10;
 uint8_t CMD_RANDM_PRGM_DATA = 0x84;
 uint8_t CMD_LD_PRGM_DATA = 0x02;
 uint8_t CMD_SET_FEATURE = 0x1F;
+uint8_t CMD_BLOCK_ERASE = 0xD8;
 
 
 int trial_column_addr = 0x00;
@@ -37,6 +38,7 @@ uint8_t trial_data_byte2 = 0x00;
 #define M78A_FLASH_SIZE		(M78A_BLOCK_SIZE*M78A_NO_OF_BLOCKS) //Size of the flash
 #define M78A_TOTAL_SECTORS	(M78A_NO_OF_SEC*M78A_NO_OF_PAGES*M78A_NO_OF_BLOCKS) //Total no. of sectors
 #define M78A_SECTORS_PER_BLOCK	(M78A_NO_OF_PAGES*M78A_NO_OF_SEC) //No. of sectors per block
+#define M78A_TOTAL_BYTES_PER_BLOCK (M78A_NO_OF_PAGES * M78A_NO_OF_SEC * M78A_SECTOR_SIZE)
 #define m78a_RD_SREG_CMD_LEN 0x02
 #define m78a_MIN_RCV_BYTES_LEN 0x03
 #define m78a_PFAIL_STAT (1<<3)
@@ -56,6 +58,7 @@ void m78a_init(SPI_HandleTypeDef *spih)
 	spihandler = *spih;
 	device_info_t info;  // Allocate on stack
 
+	for(int i = 0; i< 100000; i++);
 	m78a_read_device_manufacturar_id(&info);  // Pass the address of the struct
 
 	//setting the protect register to access all the regions (making it unprotected)
@@ -70,17 +73,19 @@ void m78a_init(SPI_HandleTypeDef *spih)
     m78a_readReg(m78a_PROTECT_REG_ADDR, &reg);
     m78a_readReg(m78a_CONFIG_REG_ADDR, &reg);
 
-
 	uint8_t data_buffer[4] = {0xab, 0xbc, 0xcd, 0xef};
 
 	uint8_t read_buffer[4] = {0};
-//	m78a_write(data_buffer, 2, 0x0010);
-//	m78a_read(read_buffer, 2, 0x0010);
-//	for(int i = 0; i< 100; i++);
-	 m78a_program_load(trial_column_addr,data_buffer );   //colunm, data
-	 m78a_program_execute(trial_block_addr, trial_page_addr);		//block, page
+	m78a_write(data_buffer, 4, 0x0020);
+	m78a_read(read_buffer, 4, 0x0020);
+	m78a_blockerase(0x0000, 131073);
+	m78a_read(read_buffer, 4, 0x0067);
+	m78a_read(read_buffer, 4, 0x0089);
+	m78a_read(read_buffer, 4, 0x0400);
+	//  m78a_program_load(trial_column_addr,data_buffer );   //colunm, data
+	//  m78a_program_execute(trial_block_addr, trial_page_addr);		//block, page
 
-	m78a_pageRead(trial_block_addr, trial_page_addr, trial_column_addr);		//block, page, column
+	// m78a_pageRead(trial_block_addr, trial_page_addr, trial_column_addr);		//block, page, column
 
 }
 uint8_t m78a_readReg(m78a_reg_t reg_addr, reg_contents_t *reg)
@@ -151,8 +156,49 @@ void m78a_page_read(uint16_t pageNum)
 		;
 	}
 
+}
 
+int m78a_blockerase(uint32_t addr, uint32_t len)
+{
+    
+    int block = addr / M78A_NO_OF_BLOCKS;
+    int no_of_blocks_to_be_erase = len / M78A_TOTAL_BYTES_PER_BLOCK;
+    if(len == M78A_TOTAL_BYTES_PER_BLOCK || len < M78A_TOTAL_BYTES_PER_BLOCK )
+    {
 
+    }
+    else if(len > M78A_TOTAL_BYTES_PER_BLOCK)
+    {
+    	no_of_blocks_to_be_erase += 1;
+    }
+
+    uint8_t cmd_buffer[4] = {};
+    int reg_value = 0;
+    while(no_of_blocks_to_be_erase > 0)
+    {
+        m78a_write_enable();
+        cmd_buffer[0] = CMD_BLOCK_ERASE;
+        cmd_buffer[1] = CMD_DUMMY_BYTES; 
+        cmd_buffer[2] = block;
+        cmd_buffer[3] = 0;     				//giving 0 as page address
+
+        spi(cmd_buffer, NULL, 4, 0);
+
+        no_of_blocks_to_be_erase -=1;
+        block += 1;
+        while((reg_value = m78a_readReg(m78a_STATUS_REG_ADDR, &reg)) & (1 << 0))
+		{
+			;
+		}
+        if(reg_value&m78a_PFAIL_STAT)
+        {
+            return -1;
+        }
+
+    }
+    return 1;
+
+    
 
 }
 
@@ -323,10 +369,10 @@ void m78a_program_load(int column, uint8_t *data_byte_buffer)
 	//Sending the command for program load, dummy bits , plane bit(0), 12 column address bits and data buffer
     uint8_t dummy_and_colunm = column >> 8;
 	column = column & 0xFF;
-	uint8_t program_load_cmd_buffer[] = {CMD_LD_PRGM_DATA, dummy_and_colunm, column };
+	uint8_t program_load_cmd_buffer[] = {CMD_LD_PRGM_DATA, dummy_and_colunm, column, data_byte_buffer[0], data_byte_buffer[1] };
 	uint8_t dummy_buffer[0];
-	spi(program_load_cmd_buffer, dummy_buffer, 3 , 0);
-	spi(data_byte_buffer, dummy_buffer, 2047, 0);
+	spi(program_load_cmd_buffer, dummy_buffer, 5 , 0);
+
 }
 
 //transferring from cache register to
@@ -334,6 +380,7 @@ void m78a_program_load(int column, uint8_t *data_byte_buffer)
 void m78a_program_execute(int block, int page)
 {
 	int temp = 0;
+	uint8_t reg_value = 0;
 	temp = block & 0xF;
 	block = block >> 2;
 	temp <<= 6;
@@ -342,9 +389,13 @@ void m78a_program_execute(int block, int page)
 	uint8_t recieved_data_bytes[4] = {0};
 
 	spi(program_execute_cmd_buffer, recieved_data_bytes, 4, 0);
+	while((reg_value = m78a_readReg(m78a_STATUS_REG_ADDR, &reg)) & (1 << 0))
+	{
+		;
+	}
 
 	//sending get command and status register address to check and recieving the contents of status register, polling the Operation in execution command to see if read is done(data from memory to cache is done)
-	m78a_check_status_register(OIP_BIT);
+	//m78a_check_status_register(OIP_BIT);
 
 
 
