@@ -196,12 +196,59 @@ int m78a_blockerase(uint32_t addr, uint32_t len)
         }
 
     }
-    return 1;
-
-    
+    return 1;   
 
 }
 
+int m78a_write_spare(uint8_t *data_ptr, uint8_t no_of_bytes_to_write, uint16_t page_num, uint16_t page_off)
+{
+    uint8_t cmdBuffer[4] = { 0 };   
+    uint8_t dummy_byte = 0;
+    uint8_t tx_buf[3+128] = {0};
+    uint8_t reg_value=0;
+
+    if(data_ptr==NULL)
+    {
+        return -1;
+    }
+    if(no_of_bytes_to_write==0 || no_of_bytes_to_write>4)
+    {
+        return -1;
+    }
+
+    /* Enable write */
+    m78a_write_enable();
+
+
+    /*Load the program into Databuffer*/
+      tx_buf[0] = CMD_RANDM_PRGM_DATA;
+      tx_buf[1] = (page_off) >> 8;
+      tx_buf[2] = (page_num) & 0xff;
+      memcpy(tx_buf + 3, data_ptr, no_of_bytes_to_write);
+      spi(tx_buf,NULL , 3 + no_of_bytes_to_write,0);
+
+       /*Execute the program*/
+        cmdBuffer[0] = CMD_PROGRAM_EXECUTE;
+        cmdBuffer[1] = dummy_byte;//Dummy byte
+        cmdBuffer[2] = ((page_num >> 8) & 0xff);
+        cmdBuffer[3] = (page_num & 0xff);
+
+
+        spi(tx_buf,NULL , 4,0);
+
+        /*Wait until data is written to the flash*/
+			while((reg_value = m78a_readReg(m78a_STATUS_REG_ADDR, &reg)) & (1 << 0))
+			{
+				;
+			}
+            if(reg_value&m78a_PFAIL_STAT)
+            {
+                return -1;
+            }
+
+    return 1;
+
+}
 int m78a_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, uint32_t readLoc)
 {
     uint8_t cmdBuffer[4] = {0};

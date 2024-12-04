@@ -45,6 +45,7 @@ void m78a_program_execute(int block, int page);
 void m78a_write_enable(void);
 void m78a_check_status_register(int number_of_bit);
 int m78a_blockerase(uint32_t addr, uint32_t len);
+int m78a_write_spare(uint8_t *data_ptr, uint8_t no_of_bytes_to_write, uint16_t page_num, uint16_t page_off);
 
 int m78a_write(const uint8_t* dataPtr, uint32_t noOfbytesToWrite, uint32_t writeLoc);
 int m78a_read(uint8_t* dataPtr, uint32_t noOfbytesToRead, uint32_t readLoc);
